@@ -3,6 +3,7 @@ package main
 import "base:intrinsics"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 
 FILENAME :: "Main.class"
 
@@ -253,6 +254,7 @@ Exception :: struct {
 
 class_file: Class_File
 
+// https://docs.oracle.com/javase/specs/jvms/se7/html/jvms-4.html
 main :: proc() {
 	handle, err := os.open(FILENAME, os.O_RDONLY)
 	if err != 0 {
@@ -276,8 +278,14 @@ main :: proc() {
 	class_file.attributes_count = parse_u2(handle)
 	class_file.attributes = parse_attribute_info(handle, class_file.attributes_count)
 
-	// https://docs.oracle.com/javase/specs/jvms/se12/html/jvms-6.html#jvms-6.5
-	// https://docs.oracle.com/javase/specs/jvms/se12/html/jvms-5.html#jvms-5.3
+	// fmt.println("File version:", class_file.major_version, class_file.minor_version)
+
+	// Show this class name
+	// class := class_file.constant_pool[class_file.this_class - 1].data.(CONSTANT_Class)
+	// fmt.println(
+	// 	"This Class name:",
+	// 	class_file.constant_pool[class.name_index - 1].data.(CONSTANT_Utf8).str,
+	// )
 
 	run_method(class_file, "main")
 }
@@ -291,6 +299,7 @@ run_method :: proc(class_file: Class_File, method_name: string) {
 			attrib_name := class_file.constant_pool[attrib.attribute_name_index - 1]
 			if attrib_name.data.(CONSTANT_Utf8).str == "Code" {
 				code_attrib := parse_code_attrib(attrib.info)
+				fmt.println("code:", code_attrib.code)
 				execute_code(class_file, code_attrib)
 			}
 		}
@@ -302,19 +311,19 @@ parse_code_attrib :: proc(bytes: []u8) -> Code_Attribute {
 	cursor := 0
 
 	cursor += 2
-	code.max_stack = (transmute([]u16be)bytes[cursor - 2:cursor])[0]
+	code.max_stack = slice.to_type(bytes[cursor - 2:cursor], u16be)
 	cursor += 2
-	code.max_locals = (transmute([]u16be)bytes[cursor - 2:cursor])[0]
+	code.max_locals = slice.to_type(bytes[cursor - 2:cursor], u16be)
 	cursor += 4
-	code.code_length = (transmute([]u32be)bytes[cursor - 4:cursor])[0]
+	code.code_length = slice.to_type(bytes[cursor - 4:cursor], u32be)
 	cursor += int(code.code_length)
 	code.code = bytes[cursor - int(code.code_length):cursor]
 	cursor += 2
-	code.exception_table_length = (transmute([]u16be)bytes[cursor - 2:cursor])[0]
+	code.exception_table_length = slice.to_type(bytes[cursor - 2:cursor], u16be)
 	assert(code.exception_table_length == 0, "We do not support parsing exceptions yet")
 	code.exception_table = {}
 	cursor += 2
-	code.attributes_count = (transmute([]u16be)bytes[cursor - 2:cursor])[0]
+	code.attributes_count = slice.to_type(bytes[cursor - 2:cursor], u16be)
 	// TODO: Add support for attributes
 	code.attributes = {}
 
@@ -389,6 +398,7 @@ get_integer_value_from :: proc(node: StackNode, int_fields_map: map[string]int) 
 	}
 }
 
+// https://docs.oracle.com/javase/specs/jvms/se12/html/jvms-6.html#jvms-6.5
 execute_code :: proc(class_file: Class_File, code_attrib: Code_Attribute) {
 	stack := stack_init(int(code_attrib.max_stack))
 	int_fields_map := make(map[string]int)
@@ -400,7 +410,7 @@ execute_code :: proc(class_file: Class_File, code_attrib: Code_Attribute) {
 		switch instruction {
 		case .GETSTATIC:
 			cursor += 2
-			cp_index := (transmute([]u16be)code_attrib.code[cursor - 1:cursor + 1])[0]
+			cp_index := slice.to_type(code_attrib.code[cursor - 1:cursor + 1], u16be)
 
 			field_ref := class_file.constant_pool[cp_index - 1].data.(CONSTANT_Fieldref)
 
@@ -430,7 +440,7 @@ execute_code :: proc(class_file: Class_File, code_attrib: Code_Attribute) {
 			}
 		case .PUTSTATIC:
 			cursor += 2
-			cp_index := (transmute([]u16be)code_attrib.code[cursor - 1:cursor + 1])[0]
+			cp_index := slice.to_type(code_attrib.code[cursor - 1:cursor + 1], u16be)
 
 			field_ref := class_file.constant_pool[cp_index - 1].data.(CONSTANT_Fieldref)
 
@@ -488,7 +498,7 @@ execute_code :: proc(class_file: Class_File, code_attrib: Code_Attribute) {
 			stack_push(&stack, StackNode{node})
 		case .INVOKEVIRTUAL:
 			cursor += 2
-			cp_index := (transmute([]u16be)code_attrib.code[cursor - 1:cursor + 1])[0]
+			cp_index := slice.to_type(code_attrib.code[cursor - 1:cursor + 1], u16be)
 
 			method_ref := class_file.constant_pool[cp_index - 1].data.(CONSTANT_Methodref)
 
@@ -540,6 +550,4 @@ method_println :: proc(stack: ^Stack, int_fields_map: map[string]int) {
 	case:
 		panic("Non supported stack node in get integer value")
 	}
-
-
 }
